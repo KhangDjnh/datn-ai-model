@@ -1,12 +1,14 @@
-numpy
-opencv-python
-mediapipe
-deepface
-tensorflow<2.16  # Bản mới nhất đôi khi xung đột, dùng bản ổn định 2.15 hoặc 2.10 tuỳ CUDA
+numpy==1.26.4
+opencv-python==4.10.0.84
+opencv-contrib-python==4.10.0.84
+pillow
+tensorflow==2.15.0
+tf-keras==2.15.0
+mediapipe==0.10.14
+deepface==0.0.91
 pandas
 matplotlib
 fastapi
-uvicorn
+uvicorn[standard]
 websockets
 python-multipart
-tf-keras

@@ -70,12 +70,14 @@ class EmotionRecognizer:
                 if face_crop.size == 0:
                     continue
 
-                # Tiền xử lý giống lúc Train (Resize 96x96, RGB, Normalize)
                 try:
-                    roi = cv2.resize(face_crop, (96, 96))
-                    roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB) # Model train bằng RGB
-                    roi = np.expand_dims(roi, axis=0) # Thêm dimension batch: (1, 96, 96, 3)
-                    roi = roi / 255.0
+                    # --- SỬA LỖI TẠI ĐÂY: Đổi 96 thành 48 ---
+                    roi = cv2.resize(face_crop, (48, 48)) 
+                    # ----------------------------------------
+                    
+                    roi = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB) # Custom CNN của mình train bằng RGB
+                    roi = np.expand_dims(roi, axis=0) # Thêm dimension batch: (1, 48, 48, 3)
+                    roi = roi / 255.0 # Chuẩn hóa về 0-1 giống lúc train
 
                     # Dự đoán
                     preds = self.model.predict(roi, verbose=0)[0]
