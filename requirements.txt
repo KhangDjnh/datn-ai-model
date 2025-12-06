@@ -1,0 +1,12 @@
+numpy
+opencv-python
+mediapipe
+deepface
+tensorflow<2.16  # Bản mới nhất đôi khi xung đột, dùng bản ổn định 2.15 hoặc 2.10 tuỳ CUDA
+pandas
+matplotlib
+fastapi
+uvicorn
+websockets
+python-multipart
+tf-keras
