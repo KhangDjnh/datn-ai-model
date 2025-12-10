@@ -4,6 +4,7 @@ import cv2
 import numpy as np
 import base64
 import json
+import os
 from core.emotion_recognition import EmotionRecognizer
 from core.face_verification import FaceVerifier
 import logging
@@ -90,17 +91,22 @@ async def websocket_verify(websocket: WebSocket):
             data = await websocket.receive_text()
             
             try:
-                # Parse JSON (nếu client gửi JSON object)
+                # Parse JSON object từ client
                 payload = json.loads(data)
-                image_base64 = payload.get("image", "")
+                username_from_client = payload.get("username", "")
+                image_base64 = payload.get("faceimage", "")
             except:
-                # Nếu không phải JSON, coi toàn bộ text là Base64
-                image_base64 = data
-            
-            if not image_base64:
+                logger.error("Không thể parse JSON từ client")
                 await websocket.send_json({
                     "status": "error",
-                    "message": "Không nhận được ảnh"
+                    "message": "Dữ liệu không hợp lệ"
+                })
+                continue
+            
+            if not image_base64 or not username_from_client:
+                await websocket.send_json({
+                    "status": "error",
+                    "message": "Thiếu username hoặc faceimage"
                 })
                 continue
             
@@ -124,16 +130,33 @@ async def websocket_verify(websocket: WebSocket):
                     distance = float(distance)
                     is_match = bool(distance < 0.6)
                     
-                    await websocket.send_json(convert_numpy_types({
-                        "status": "ok",
-                        "user": name,
-                        "distance": distance,
-                        "match": is_match,
-                        "message": f"Tìm thấy: {name}" if is_match else f"Không khớp: {name} (distance: {distance:.4f})"
-                    }))
+                    # So sánh username từ client với kết quả model
+                    username_match = str(username_from_client).lower() == str(name).lower()
+                    
+                    if is_match and username_match:
+                        # Username trùng khớp với kết quả model
+                        await websocket.send_json(convert_numpy_types({
+                            "status": "ok",
+                            "user": name,
+                            "username_provided": username_from_client,
+                            "distance": distance,
+                            "match": True,
+                            "message": f"Xác thực thành công: {name}"
+                        }))
+                    else:
+                        # Không khớp
+                        await websocket.send_json(convert_numpy_types({
+                            "status": "mismatch",
+                            "user": name,
+                            "username_provided": username_from_client,
+                            "distance": distance,
+                            "match": False,
+                            "message": f"Username không trùng khớp. Đã phát hiện: {name}"
+                        }))
                 else:
                     await websocket.send_json({
                         "status": "not_found",
+                        "username_provided": username_from_client,
                         "message": "Không tìm thấy khuôn mặt phù hợp trong database"
                     })
             
@@ -242,3 +265,92 @@ async def health_check():
         "emotion_model": emotion_recognizer.model is not None,
         "face_verifier": face_verifier is not None
     }
+
+@app.post("/api/save-identity")
+async def save_identity_image(data: dict):
+    """
+    Endpoint lưu ảnh nhận diện khuôn mặt vào database
+    Nhận JSON: {"username": "...", "faceIdentifyImage": "base64_string"}
+    Trả về: {"status": "success/error", "message": "...", "filepath": "..."}
+    """
+    try:
+        username = data.get("username", "").strip()
+        face_image_base64 = data.get("faceIdentifyImage", "").strip()
+        
+        # Kiểm tra dữ liệu
+        if not username:
+            return {
+                "status": "error",
+                "message": "Username không được để trống"
+            }
+        
+        if not face_image_base64:
+            return {
+                "status": "error",
+                "message": "faceIdentifyImage không được để trống"
+            }
+        
+        # Giải mã Base64 thành ảnh
+        try:
+            # Loại bỏ header nếu có (data:image/jpeg;base64,)
+            if "," in face_image_base64:
+                face_image_base64 = face_image_base64.split(",")[1]
+            
+            # Decode Base64
+            image_data = base64.b64decode(face_image_base64)
+            nparr = np.frombuffer(image_data, np.uint8)
+            image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+            
+            if image is None or image.size == 0:
+                return {
+                    "status": "error",
+                    "message": "Ảnh không hợp lệ"
+                }
+        except Exception as e:
+            logger.error(f"Lỗi giải mã Base64: {e}")
+            return {
+                "status": "error",
+                "message": f"Lỗi giải mã ảnh: {str(e)}"
+            }
+        
+        # Tạo thư mục database nếu chưa tồn tại
+        db_path = "database"
+        if not os.path.exists(db_path):
+            os.makedirs(db_path)
+            logger.info(f"Tạo thư mục {db_path}")
+        
+        # Xác định định dạng ảnh (jpg, png, etc.)
+        # Mặc định là jpg nếu không thể xác định
+        file_extension = ".jpg"
+        
+        # Cố gắng phát hiện định dạng từ magic bytes
+        if len(image_data) > 3:
+            if image_data[:3] == b'\xff\xd8\xff':
+                file_extension = ".jpg"
+            elif image_data[:4] == b'\x89PNG':
+                file_extension = ".png"
+            elif image_data[:4] == b'GIF8':
+                file_extension = ".gif"
+        
+        # Lưu ảnh với tên là username
+        filename = f"{username}{file_extension}"
+        filepath = os.path.join(db_path, filename)
+        
+        # Lưu ảnh (nếu file tồn tại, sẽ overwrite)
+        cv2.imwrite(filepath, image)
+        
+        logger.info(f"✓ Lưu ảnh thành công: {filepath}")
+        
+        return {
+            "status": "success",
+            "message": f"Ảnh của {username} đã được lưu thành công",
+            "filepath": filepath,
+            "filename": filename
+        }
+    
+    except Exception as e:
+        logger.error(f"Lỗi lưu ảnh: {e}")
+        return {
+            "status": "error",
+            "message": f"Lỗi xử lý: {str(e)}"
+        }
